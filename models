@@ -1,0 +1,96 @@
+import math
+import numpy as np
+stdROS=0.36
+#standard rate of ground spread from measured chaparral wildfire in northern California (Stephens et. al. 2008)
+pctf=0.05
+#probability cutoff set to 5%
+geodctf=10
+#learned cutoff for geodesic arc-length
+flatctf=10
+#learned cutoff for Euclidean distance
+N=100
+#number of intervals in arc-length and geodesic approximations (Riemann sum, Euler's method, respectively)
+def ROS(stdROS,h):
+    ROS=stdROS*(0.42/h)**0.2
+    return ROS
+#calculates rate of ground spread adjusted based on relative humidity
+def Albmax(v,h):
+    E=83.9*v**(-1.04)*17828*ROS(stdROS,h)
+    H=0.173*E**0.5
+    F=1.3*10**(-3)*(v*0.02857)*1.414*(0.362+(H/2)**0.5*0.5*math.log(H/2))
+    X=2.78*v*(H/10)**(1/7)*H**0.5
+    D=F+X
+    return D
+#maximum spotting distance in Albini model (Albini 1983)
+def Eucld(x, y, X, Y):
+    d=((x-X)**2+(y-Y)**2)**0.5
+    return d
+#Euclidean distance between two points
+def Albprob(x, y, X, Y, v):
+    d=Eucld(x, y, X, Y)
+    sgm=Albmax(v)/(2*math.log(2))**0.5
+    CDFComp=(math.e)**(-d**2/(2*sgm**2))
+    return CDFComp
+#calculates Albini model spotting probability from Rayleigh distribution with maximum spotting distance as median
+def Alb(x, y, X, Y, v):
+    prob=Albprob(x,y,X,Y,v)
+    if prob >= pctf:
+        return 1
+    else:
+        return 0
+#compares Albini spotting probability to probability cutoff to predict spotting (1) or no spotting (0)
+def geod(x, y, X, Y, a, b, c, d, e, v, h):
+    delta=1/N
+    pval=np.arange(0,1,delta)
+    xc=X
+    yc=Y
+    tc=0
+    td=Eucld(x, y, X, Y)/ROS(stdROS,h)
+    xd=x-X
+    yd=y-Y
+    tdd=0
+    xdd=0
+    ydd=0
+    p=0
+    lightcone='null'
+    L=0
+    for p in pval:
+        tdd=0
+        xdd=-2*a*(2*a*xc+c)*(1+(2*a*xc+c)**2)*xd**2
+        ydd=-2*b*(2*b*yc+d)*(1+(2*b*yc+d)**2)*xd**2
+        td+=tdd*delta
+        xd+=xdd*delta
+        yd+=ydd*delta
+        tc+=td*delta+0.5*tdd*delta**2
+        xc+=xd*delta+0.5*xdd*delta**2
+        yc+=yd*delta+0.5*ydd*delta**2
+        radicand=v**2*(1-h**2)*(td)**2-(1+(2*a*xc+c)**2)*(xd)**2-(1+(2*b*yc+d)**2)*(yd)**2
+        if radicand > 0:
+            lightcone='timelike'
+            L+=(radicand)**0.5*delta
+        elif radicand < 0:
+            lightcone='spacelike'
+            L+=(-radicand)**0.5*delta
+        else:
+            lightcone='lightlike'
+        p+=delta
+    return L
+#calculates geodesic arc-length (GAL) between two points, initializing first derivative vector to point towards target
+def Einst(x, y, X, Y, a, b, c, d, e, v, h):
+    geod=geod(x, y, X, Y, a, b, c, d, e, v, h)
+    sgm=geodctf/(2*math.log(2))**0.5
+    CDFComp=(math.e)**(-geod**2/(2*sgm**2))
+    if CDFComp >= pctf:
+        return 1
+    else:
+        return 0
+#predicts spotting (1) or no spotting (0) with geodesic model using GAL cutoff as median of Rayleigh distribution
+def flat(x,y,X,Y):
+    dist=Eucld(x,y,X,Y)
+    sgm=flatctf/(2*math.log(2))**0.5
+    CDFComp=(math.e)**(-dist**2/(2*sgm**2))
+    if CDFComp >= pctf:
+        return 1
+    else:
+        return 0
+#predicts spotting (1) or no spotting (0) with Euclidean model, with cutoff as median of Rayleigh distribution
